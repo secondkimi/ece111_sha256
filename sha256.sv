@@ -12,7 +12,7 @@ module sha256(input logic clk, reset_n, start,
   logic [15:0] rc, wc; // read and write counters
   
   logic [31:0] blk_counter; // varies from 0 to (# of blocks - 1)
-  logic [31:0] num_blks; // assigned by the function call 
+  logic[31:0] num_blks;// assigned by the function call 
   logic [31:0] S0, s1, maj, t1, t2, ch;
   logic [7:0] t; // t varies from 0 to 63
 
@@ -48,8 +48,7 @@ logic [31:0] H;
 
 logic [31:0] M[0:15];
 logic is_padding_block;
-logic [31:0] pad_start;
-assign pad_start = size - blk_counter*64;
+int pad_start;
 int i;
 
 
@@ -81,15 +80,6 @@ begin
 	rrot = ((oldW << (32-r)) | (oldW>>r));
 end
 endfunction
-
-function logic [31:0] wtnew; // function with no inputs
-	logic [31:0] s0, s1;
-	s0 = rrot(w[t-15],7)^rrot(w[t-15],18)^rrot(w[t-15],3);
-	s1 = rrot(w[t-2],17)^rrot(w[t-2],19)^rrot(w[t-2],10);
-	wtnew = w[t-16] + s0 + w[t-7] + s1;
-endfunction  
-
-
   
   always_ff @(posedge clk, negedge reset_n)
   begin
@@ -102,9 +92,9 @@ endfunction
           if (start) begin 
 			   // global setup goes here. Not per Block variables
 				blk_counter <= 0; // increment blk_counter at the end of each M. Compare Num blks with blk_counter
-				num_blks <= determine_num_blocks(size);
 				state <= PRO_READ;
 				is_padding_block <= 0;
+				num_blks <= determine_num_blocks(size);
           end
 		PRO_READ:
 			// init A to H. BLK_COUNTER should already been pointing to the right addr
@@ -123,9 +113,9 @@ endfunction
 						M[i] = 0;
 					end
 					// TODO: append in bits rather than bytes. check testbench
-					/*
-					M[14] = (size>>32) & 32'hffffffff;
-					M[15] = size & 32'hffffffff;*/	
+					
+					M[14] = size>>29;
+					M[15] = size * 8;
 					state <= PROT;
 				end else begin
 				
@@ -163,37 +153,43 @@ endfunction
 				/*blk_counter <= blk_counter + 1;*/
 				if( (blk_counter+1)*64 <= size) begin
 					// what could happen is there are two blocks left to fill.
-					state <= proT;
+					state <= PROT;
 				end else begin
 					state <= PADDING;
 				end
 			end
 		PADDING:
 		begin
-			// use size to make sure from which position of M should you start padding
-			// TODO: the address to add one byte of one is size - blk_counter*64
-			// set is_padding_block to 1 if there is one more block left
 			// TODO: check testbench
 			case (size - blk_counter*64 % 4)
 				0: M[(size-blk_counter*64)/4] = 32'h80000000;
-				1: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FF000000 | 32'h 00800000;;
+				1: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FF000000 | 32'h 00800000;
 				2: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FFFF0000 | 32'h 00008000;
 				3: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FFFFFF00 | 32'h 00000080;
 			endcase
 			
 			
-			if(blk_counter < num_blks -1) begin
+			if (blk_counter < num_blks - 1) begin
 				// only need to add one extra bit to the tail and fill all with zero
 				is_padding_block <= 1'b1;
+				for(i=(size-blk_counter*64)/4+1; i<16; i = i+1) begin
+					M[i] = 32'h00000000;
+				end
 			end else begin
+				pad_start = (size-blk_counter*64)/4+1;
 				// add one extra bit to the tail and fill the last two words with size
-				
+				for(i=pad_start; i<14; i=i+1) begin
+					M[i] = 32'h00000000;
+				end
+				M[14] = size >> 29;
+				M[15] = size * 8;
 			end
-			// TODO: add one bit and fill the last two words with size
-			
+			state <= PROT;
 		end
 		PROT:
 		begin
+		
+			
 		end
 
       endcase
