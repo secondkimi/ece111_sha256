@@ -48,8 +48,25 @@ logic [31:0] H;
 
 logic [31:0] M[0:15];
 logic is_padding_block;
-
+logic [31:0] pad_start;
+assign pad_start = size - blk_counter*64;
 int i;
+
+
+function logic [255:0] sha256_op(input logic [31:0] a, b, c, d, e, f, g, h, w,
+                                 input logic [7:0] t);
+    logic [31:0] S1, S0, ch, maj, t1, t2; // internal signals
+begin
+    S1 = rightrotate(e, 6) ^ rightrotate(e, 11) ^ rightrotate(e, 25);
+    ch = (e & f) ^ ((~e) & g);
+    t1 = h + S1 + ch + sha256_k[t] + w;
+    S0 = rightrotate(a, 2) ^ rightrotate(a, 13) ^ rightrotate(a, 22);
+    maj = (a & b) ^ (a & c) ^ (b & c);
+    t2 = S0 + maj;
+
+    sha256_op = {t1 + t2, a, b, c, d + t1, e, f, g};
+end
+endfunction
 
 function logic [15:0] determine_num_blocks(input logic [31:0] size);
     if ((size << 3) % 512 <= 447)
@@ -105,8 +122,10 @@ endfunction
 					for(i=0; i<14; i=i+1) begin
 						M[i] = 0;
 					end
+					// TODO: append in bits rather than bytes. check testbench
+					/*
 					M[14] = (size>>32) & 32'hffffffff;
-					M[15] = size & 32'hffffffff;	
+					M[15] = size & 32'hffffffff;*/	
 					state <= PROT;
 				end else begin
 				
@@ -154,11 +173,24 @@ endfunction
 			// use size to make sure from which position of M should you start padding
 			// TODO: the address to add one byte of one is size - blk_counter*64
 			// set is_padding_block to 1 if there is one more block left
+			// TODO: check testbench
+			case (size - blk_counter*64 % 4)
+				0: M[(size-blk_counter*64)/4] = 32'h80000000;
+				1: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FF000000 | 32'h 00800000;;
+				2: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FFFF0000 | 32'h 00008000;
+				3: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FFFFFF00 | 32'h 00000080;
+			endcase
+			
+			
 			if(blk_counter < num_blks -1) begin
+				// only need to add one extra bit to the tail and fill all with zero
 				is_padding_block <= 1'b1;
 			end else begin
-				// TODO: fill the last two words with size
+				// add one extra bit to the tail and fill the last two words with size
+				
 			end
+			// TODO: add one bit and fill the last two words with size
+			
 		end
 		PROT:
 		begin
