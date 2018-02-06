@@ -4,8 +4,6 @@ module sha256(input logic clk, reset_n, start,
  output logic [15:0] mem_addr,
  output logic [31:0] mem_write_data,
  input logic [31:0] mem_read_data);
- 
- 
  	
  enum logic [3:0] {IDLE=4'b0000, PRO_READ=4'b0001, SET_ONLY=4'b0010, READ_AND_SET=4'b0011, READ_ONLY=4'b1000, DONE=4'b0101, PADDING=4'B0110, PROT=4'b0111} state;
 
@@ -50,7 +48,6 @@ logic [31:0] M[0:15];
 logic is_padding_block;
 logic[31:0] pad_start;
 int i;
-
 
 function logic [255:0] sha256_op(input logic [31:0] a, b, c, d, e, f, g, h, w,
                                  input logic [7:0] t);
@@ -99,24 +96,12 @@ endfunction
 		PRO_READ:
 			// init A to H. BLK_COUNTER should already been pointing to the right addr
 			begin
-				A <= H0;
-				B <= H1;
-				C <= H2;
-				D <= H3;
-				E <= H4;
-				F <= H5;
-				G <= H6;
-				H <= H7;
 				t <= 0;
 				for (i=0; i<16; i=i+1) begin
 					M[i] = 32'h00000000;
 				end
 				if(num_blks == blk_counter+1 && is_padding_block) begin
-					for(i=0; i<14; i=i+1) begin
-						M[i] = 0;
-					end
 					// TODO: append in bits rather than bytes. check testbench
-					
 					M[14] = size>>29;
 					M[15] = size * 8;
 					state <= PROT;
@@ -130,8 +115,8 @@ endfunction
 				end
 			end
 		READ_ONLY:
-			if(blk_counter*64 + rc == size) begin
-				state <= PADDING;
+			if(blk_counter*64 + 4*rc >= size) begin
+				state <= READ_AND_SET;
 			end
 			else begin
 				mem_we <= 0;
@@ -140,11 +125,12 @@ endfunction
 				state <= READ_AND_SET;
 			end
 		READ_AND_SET:
-			if(blk_counter*64 + rc == size) begin
+			begin
+			M[wc] <= mem_read_data;
+			if(blk_counter*64 + rc*4 >= size && (size % 64) != 0) begin	
 				state <= PADDING;
 			end
 			else begin
-				M[wc] <= mem_read_data;
 				wc <= wc + 1;
 				if(rc < 16) begin		
 					mem_we <= 0;
@@ -158,25 +144,17 @@ endfunction
 		SET_ONLY:
 			begin
 				M[wc] <= mem_read_data;
-				// TODO: consider when to increment blk_counter.
-				/*blk_counter <= blk_counter + 1;*/
-				if( (blk_counter+1)*64 <= size) begin
-					// what could happen is there are two blocks left to fill.
-					state <= PROT;
-				end else begin
-					state <= PADDING;
-				end
+				state <= PROT;
 			end
 		PADDING:
 		begin
 			// TODO: check testbench
-			case (size - blk_counter*64 % 4)
+			case ((size - blk_counter*64) % 4)
 				0: M[(size-blk_counter*64)/4] = 32'h80000000;
 				1: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FF000000 | 32'h 00800000;
 				2: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FFFF0000 | 32'h 00008000;
 				3: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FFFFFF00 | 32'h 00000080;
 			endcase
-			pad_start = (size-blk_counter*64)/4+1;
 			
 			if (blk_counter < num_blks - 1) begin
 				// only need to add one extra bit to the tail and fill all with zero
@@ -190,8 +168,16 @@ endfunction
 			state <= PROT;
 		end
 		PROT:
-			// PROT performs 64 rounds 
 		begin
+				A <= H0;
+				B <= H1;
+				C <= H2;
+				D <= H3;
+				E <= H4;
+				F <= H5;
+				G <= H6;
+				H <= H7;
+				// PROT performs 64 rounds 
 		
 			
 		end
