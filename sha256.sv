@@ -48,7 +48,7 @@ logic [31:0] H;
 
 logic [31:0] M[0:15];
 logic is_padding_block;
-int pad_start;
+logic[31:0] pad_start;
 int i;
 
 
@@ -108,6 +108,9 @@ endfunction
 				G <= H6;
 				H <= H7;
 				t <= 0;
+				for (i=0; i<16; i=i+1) begin
+					M[i] = 32'h00000000;
+				end
 				if(num_blks == blk_counter+1 && is_padding_block) begin
 					for(i=0; i<14; i=i+1) begin
 						M[i] = 0;
@@ -127,14 +130,20 @@ endfunction
 				end
 			end
 		READ_ONLY:
-			begin
+			if(blk_counter*64 + rc == size) begin
+				state <= PADDING;
+			end
+			else begin
 				mem_we <= 0;
 				mem_addr <= message_addr+blk_counter*16 + rc;
 				rc <= rc + 1;
 				state <= READ_AND_SET;
 			end
 		READ_AND_SET:
-			begin
+			if(blk_counter*64 + rc == size) begin
+				state <= PADDING;
+			end
+			else begin
 				M[wc] <= mem_read_data;
 				wc <= wc + 1;
 				if(rc < 16) begin		
@@ -167,26 +176,21 @@ endfunction
 				2: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FFFF0000 | 32'h 00008000;
 				3: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FFFFFF00 | 32'h 00000080;
 			endcase
-			
+			pad_start = (size-blk_counter*64)/4+1;
 			
 			if (blk_counter < num_blks - 1) begin
 				// only need to add one extra bit to the tail and fill all with zero
 				is_padding_block <= 1'b1;
-				for(i=(size-blk_counter*64)/4+1; i<16; i = i+1) begin
-					M[i] = 32'h00000000;
-				end
+				
 			end else begin
-				pad_start = (size-blk_counter*64)/4+1;
 				// add one extra bit to the tail and fill the last two words with size
-				for(i=pad_start; i<14; i=i+1) begin
-					M[i] = 32'h00000000;
-				end
 				M[14] = size >> 29;
 				M[15] = size * 8;
 			end
 			state <= PROT;
 		end
 		PROT:
+			// PROT performs 64 rounds 
 		begin
 		
 			
