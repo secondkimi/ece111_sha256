@@ -6,7 +6,8 @@ module sha256(input logic clk, reset_n, start,
  input logic [31:0] mem_read_data);
  	
  enum logic [3:0] {IDLE=4'b0000, PRO_READ=4'b0001, SET_ONLY=4'b0010, READ_AND_SET=4'b0011, 
- READ_ONLY=4'b0100, DONE=4'b0101, PADDING=4'B0110, PROT=4'b0111, WRITE=4'b1000} state;
+ READ_ONLY=4'b0100, DONE=4'b0101, PADDING=4'B0110, COMPUTE_W=4'b0111, UPDATE_HASH=4'b1000,
+ UPDATE_PARAM=4'b1001,WRITE=4'b1010, UPDATE_S=4'b1011, UPDATE_T=4'b1100, UPDATE_S0=4'b1110, UPDATE_S1=4'b1111} state;
 
   logic [15:0] rc, wc; // read and write counters during read state
   logic [15:0] out_wc;
@@ -28,7 +29,8 @@ module sha256(input logic clk, reset_n, start,
  32'h748f82ee, 32'h78a5636f, 32'h84c87814, 32'h8cc70208, 32'h90befffa, 32'ha4506ceb, 32'hbef9a3f7, 32'hc67178f2
 };
 
-logic [31:0] h[0:7];
+/*logic [31:0] h[0:7];*/
+logic [31:0] h0, h1, h2, h3, h4, h5, h6, h7;
 
 
 logic [31:0] A; 
@@ -39,6 +41,7 @@ logic [31:0] E;
 logic [31:0] F; 
 logic [31:0] G; 
 logic [31:0] H;
+logic [31:0] S1, S0, ch, maj, t1, t2;
 
 logic [31:0] M[0:15];
 logic is_padding_block;
@@ -97,7 +100,7 @@ endfunction
 				is_exact_block <= 0;
 				out_wc <= 0;
 				num_blks <= determine_num_blocks(size);
-				
+				/*
 				h[0] <= 32'h6a09e667;
 				h[1] <= 32'hbb67ae85;
 				h[2] <= 32'h3c6ef372;
@@ -105,7 +108,15 @@ endfunction
 				h[4] <= 32'h510e527f;
 				h[5] <= 32'h9b05688c;
 				h[6] <= 32'h1f83d9ab;
-				h[7] <= 32'h5be0cd19;
+				h[7] <= 32'h5be0cd19;*/
+				h0 <= 32'h6a09e667;
+				h1 <= 32'hbb67ae85;
+				h2 <= 32'h3c6ef372;
+				h3 <= 32'ha54ff53a;
+				h4 <= 32'h510e527f;
+				h5 <= 32'h9b05688c;
+				h6 <= 32'h1f83d9ab;
+				h7 <= 32'h5be0cd19;
           end
 		PRO_READ:
 			// init A to H. BLK_COUNTER should already been pointing to the right addr
@@ -113,42 +124,51 @@ endfunction
 				$display("PRO_READ");
 				$display("number of blk is %d",num_blks);
 				t <= 0;
+				
 				for (i=0; i<16; i=i+1) begin
 					M[i] = 32'h00000000;
 				end
+				A <= h0;
+				B <= h1;
+				C <= h2;
+				D <= h3;
+				E <= h4;
+				F <= h5;
+				G <= h6;
+				H <= h7;
 				// -----
-					if ( (blk_counter == num_blks -1) && (is_exact_block == 1)) begin
-						$display("filling last blk of exact blk");
-						M[0] = 32'h80000000;
-						M[14] = size >> 29;
-						M[15] = size * 8;
-						state <= PROT;
-						// TODO: block_counter
-					end else if((blk_counter == num_blks -1) && (is_padding_block == 1)) begin
-						// TODO: append in bits rather than bytes. check testbench
-						$display("filling last blk of not exact blk");
-						M[14] = size>>29;
-						M[15] = size * 8;
-						state <= PROT;
-					end else begin
-						rc <= 1;
-						wc <= 0;
-						mem_we <= 0;
-						mem_addr <= message_addr+blk_counter*16;
-						state <= READ_ONLY;
-					end
+				if ( (blk_counter == num_blks -1) && (is_exact_block == 1)) begin
+					$display("filling last blk of exact blk");
+					M[0] = 32'h80000000;
+					M[14] = size >> 29;
+					M[15] = size * 8;
+					state <= COMPUTE_W;
+					// TODO: block_counter
+				end else if((blk_counter == num_blks -1) && (is_padding_block == 1)) begin
+					// TODO: append in bits rather than bytes. check testbench
+					$display("filling last blk of not exact blk");
+					M[14] = size>>29;
+					M[15] = size * 8;
+					state <= COMPUTE_W;
+				end else begin
+					rc <= 1;
+					wc <= 0;
+					mem_we <= 0;
+					mem_addr <= message_addr+blk_counter*16;
+					state <= READ_ONLY;
+				end
 				/*
 				if(num_blks == blk_counter+1) begin
 					if (is_exact_block == 1) begin
 						M[0] = 32'h80000000;
 						M[14] = size >> 29;
 						M[15] = size * 8;
-						state <= PROT;
+						state <= COMPUTE_W;
 					end else if(is_padding_block == 1) begin
 						// TODO: append in bits rather than bytes. check testbench
 						M[14] = size>>29;
 						M[15] = size * 8;
-						state <= PROT;
+						state <= COMPUTE_W;
 					end else begin
 					rc <= 1;
 					wc <= 0;
@@ -205,14 +225,14 @@ endfunction
 					if((blk_counter*64 + (wc+1)*4 >= size)) begin
 						state <= PADDING;
 					end else begin
-						state <= PROT;
+						state <= COMPUTE_W;
 					end
 				end
 			end
 		PADDING:
 		if (size%64 == 0) begin
 			$display("Find padding with exact blk");
-			state <= PROT;
+			state <= COMPUTE_W;
 			is_exact_block <= 1'b1;
 		end
 		else begin
@@ -236,61 +256,125 @@ endfunction
 				M[14] = size >> 29;
 				M[15] = size * 8;
 			end
-			state <= PROT;
+			state <= COMPUTE_W;
 		end
-		PROT:
-		begin
+		COMPUTE_W:
 		
-		// start here
-		$display("PROT");
-		for (i = 0; i < 64; i = i + 1) begin
-            if (i < 16) begin
-                w[i] = M[i];
-            end else begin
-                s0 = rrot(w[i-15], 7) ^ rrot(w[i-15], 18) ^ (w[i-15] >> 3);
-                s1 = rrot(w[i-2], 17) ^ rrot(w[i-2], 19) ^ (w[i-2] >> 10);
-                w[i] = w[i-16] + s0 + w[i-7] + s1;
-            end
-        end
-        // INITIAL HASH AT ROUND K
-				A = h[0];
-				B = h[1];
-				C = h[2];
-				D = h[3];
-				E = h[4];
-				F = h[5];
-				G = h[6];
-				H = h[7];
+		begin
+			$display("COMPUTE_W state");
+			if (t == 64) begin
+				// done with this round, go back to proread
+				state <= UPDATE_HASH;
+				
+			end else begin
+				// do on cycle of execution.
+				if (t < 16) begin 
+					w[t] <= M[t];
+				end else begin
+					 s0 = rrot(w[t-15], 7) ^ rrot(w[t-15], 18) ^ (w[t-15] >> 3);
+                s1 = rrot(w[t-2], 17) ^ rrot(w[t-2], 19) ^ (w[t-2] >> 10);
+                w[t] <= w[t-16] + s0 + w[t-7] + s1;
+				end
+				state <= UPDATE_S;
+				//state <= UPDATE_S0;
+			end
+		end
+		/*
+		UPDATE_S0:
+		begin
+			S0 <= rrot(A, 2) ^ rrot(A, 13) ^ rrot(A, 22);
+			maj <= (A & B) ^ (A & C) ^ (B & C);
+			state <= UPDATE_S1;
+		end
+		
+		UPDATE_S1:
+		begin
+			S1 <= rrot(E, 6) ^ rrot(E, 11) ^ rrot(E, 25);
+			ch <= (E & F) ^ ((~E) & G);
+			state <= UPDATE_T;
+		end
+		*/
+		
+		UPDATE_S:
+		begin
+			$display("update_s");
+			S0 <= rrot(A, 2) ^ rrot(A, 13) ^ rrot(A, 22);
+			S1 <= rrot(E, 6) ^ rrot(E, 11) ^ rrot(E, 25);
+			maj <= (A & B) ^ (A & C) ^ (B & C);
+			ch <= (E & F) ^ ((~E) & G);
+			state <= UPDATE_T;
+		end
+		
+		UPDATE_T:
+		begin
+			$display("update_t");
+			t1 <= H + S1 + ch + sha256_k[t] + w[t];
+			t2 <= S0 + maj;
+			state <= UPDATE_PARAM;
+		end
+		
+		UPDATE_PARAM:
+		begin
+			
+			$display("update_param");
 
-        // FINAL HASH
-        for (i = 0; i < 64; i = i + 1) begin
-            {A, B, C, D, E, F, G, H} = sha256_op(A, B, C, D, E, F, G, H, w[i], i);
-        end
-        h[0] = h[0] + A;
-        h[1] = h[1] + B;
-        h[2] = h[2] + C;
-        h[3] = h[3] + D;
-        h[4] = h[4] + E;
-        h[5] = h[5] + F;
-        h[6] = h[6] + G;
-        h[7] = h[7] + H;
-		// end here
-				// TODO: first try to get H0 - H7 after 512-bit block
-				$display("blk counter is %d",blk_counter);
+			A <= t1 + t2;
+			B <= A;
+			C <= B;
+			D <= C;
+			E <= D + t1;
+			F <= E;
+			G <= F;
+			H <= G;
+			//{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, w[t], t);
+			t <= t + 1;
+			state <= COMPUTE_W;
+		end
+		
+		UPDATE_HASH:
+			begin
+				$display("UPDATE_HASH state");
+				
+				/*h[0] <= h[0] + A;
+				h[1] <= h[1] + B;
+				h[2] <= h[2] + C;
+				h[3] <= h[3] + D;
+				h[4] <= h[4] + E;
+				h[5] <= h[5] + F;
+				h[6] <= h[6] + G;
+				h[7] <= h[7] + H;*/
+				h0 <= h0 + A;
+				h1 <= h1 + B;
+				h2 <= h2 + C;
+				h3 <= h3 + D;
+				h4 <= h4 + E;
+				h5 <= h5 + F;
+				h6 <= h6 + G;
+				h7 <= h7 + H;
 				if (blk_counter >= num_blks - 1) begin
 					state <= WRITE;
 				end else begin
 					blk_counter <= blk_counter + 1;
 					state <= PRO_READ;
 				end
-				// PROT performs 64 rounds 
-		end
+			end
+		
 		WRITE:
 		begin
 			$display("write");
 			mem_we <= 1;
          mem_addr <= output_addr + out_wc;
-         mem_write_data <= h[out_wc];
+			case (out_wc)
+			0: mem_write_data <= h0;
+			1: mem_write_data <= h1;
+			2: mem_write_data <= h2;
+			3: mem_write_data <= h3;
+			4: mem_write_data <= h4;
+			5: mem_write_data <= h5;
+			6: mem_write_data <= h6;
+			7: mem_write_data <= h7;
+			endcase
+         //mem_write_data <= h[out_wc];
 			 
 			// write H0 to H7 into memory
 			if(out_wc < 7) begin
