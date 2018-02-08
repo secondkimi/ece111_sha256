@@ -48,10 +48,11 @@ logic is_padding_block;
 logic is_exact_block;
 logic[31:0] pad_start;
 int i;
-/* remove the next few entries */
+
 logic   [ 31:0] s1, s0;
 logic   [ 31:0] w[0:63];
-/* end*/
+//logic[31:0] w[0:15];
+
 
 
 function logic [31:0] rrot(input logic[31:0] oldW, input logic[7:0] r);
@@ -100,15 +101,6 @@ endfunction
 				is_exact_block <= 0;
 				out_wc <= 0;
 				num_blks <= determine_num_blocks(size);
-				/*
-				h[0] <= 32'h6a09e667;
-				h[1] <= 32'hbb67ae85;
-				h[2] <= 32'h3c6ef372;
-				h[3] <= 32'ha54ff53a;
-				h[4] <= 32'h510e527f;
-				h[5] <= 32'h9b05688c;
-				h[6] <= 32'h1f83d9ab;
-				h[7] <= 32'h5be0cd19;*/
 				h0 <= 32'h6a09e667;
 				h1 <= 32'hbb67ae85;
 				h2 <= 32'h3c6ef372;
@@ -124,10 +116,7 @@ endfunction
 				$display("PRO_READ");
 				$display("number of blk is %d",num_blks);
 				t <= 0;
-				
-				for (i=0; i<16; i=i+1) begin
-					M[i] = 32'h00000000;
-				end
+			
 				A <= h0;
 				B <= h1;
 				C <= h2;
@@ -139,51 +128,33 @@ endfunction
 				// -----
 				if ( (blk_counter == num_blks -1) && (is_exact_block == 1)) begin
 					$display("filling last blk of exact blk");
-					M[0] = 32'h80000000;
-					M[14] = size >> 29;
-					M[15] = size * 8;
+					M[0] <= 32'h80000000;
+					for (i=1; i<14; i=i+1) begin
+						M[i] <= 32'h00000000;
+					end
+					M[14] <= size >> 29;
+					M[15] <= size * 8;
 					state <= COMPUTE_W;
 					// TODO: block_counter
 				end else if((blk_counter == num_blks -1) && (is_padding_block == 1)) begin
 					// TODO: append in bits rather than bytes. check testbench
 					$display("filling last blk of not exact blk");
-					M[14] = size>>29;
-					M[15] = size * 8;
+					for (i=0; i<14; i=i+1) begin
+						M[i] <= 32'h00000000;
+					end
+					M[14] <= size>>29;
+					M[15] <= size * 8;
 					state <= COMPUTE_W;
 				end else begin
+					for (i=0; i<16; i=i+1) begin
+						M[i] <= 32'h00000000;
+					end
 					rc <= 1;
 					wc <= 0;
 					mem_we <= 0;
 					mem_addr <= message_addr+blk_counter*16;
 					state <= READ_ONLY;
 				end
-				/*
-				if(num_blks == blk_counter+1) begin
-					if (is_exact_block == 1) begin
-						M[0] = 32'h80000000;
-						M[14] = size >> 29;
-						M[15] = size * 8;
-						state <= COMPUTE_W;
-					end else if(is_padding_block == 1) begin
-						// TODO: append in bits rather than bytes. check testbench
-						M[14] = size>>29;
-						M[15] = size * 8;
-						state <= COMPUTE_W;
-					end else begin
-					rc <= 1;
-					wc <= 0;
-					mem_we <= 0;
-					mem_addr <= message_addr+blk_counter*16;
-					state <= READ_ONLY;
-					end
-				end else begin
-				
-					rc <= 1;
-					wc <= 0;
-					mem_we <= 0;
-					mem_addr <= message_addr+blk_counter*16;
-					state <= READ_ONLY;
-				end*/
 			end
 		READ_ONLY:
 			begin
@@ -239,10 +210,10 @@ endfunction
 			$display("padding");
 			// TODO: must consider the edge case that exactly multiple of 64
 			case ((size - blk_counter*64) % 4)
-				0: M[(size-blk_counter*64)/4] = 32'h80000000;
-				1: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FF000000 | 32'h 00800000;
-				2: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FFFF0000 | 32'h 00008000;
-				3: M[(size-blk_counter*64)/4] = M[(size-blk_counter*64)/4] & 32'h FFFFFF00 | 32'h 00000080;
+				0: M[(size-blk_counter*64)/4] <= 32'h80000000;
+				1: M[(size-blk_counter*64)/4] <= M[(size-blk_counter*64)/4] & 32'h FF000000 | 32'h 00800000;
+				2: M[(size-blk_counter*64)/4] <= M[(size-blk_counter*64)/4] & 32'h FFFF0000 | 32'h 00008000;
+				3: M[(size-blk_counter*64)/4] <= M[(size-blk_counter*64)/4] & 32'h FFFFFF00 | 32'h 00000080;
 			endcase
 			
 			if (blk_counter < num_blks - 1) begin
@@ -253,8 +224,8 @@ endfunction
 			end else begin
 				
 				// add one extra bit to the tail and fill the last two words with size
-				M[14] = size >> 29;
-				M[15] = size * 8;
+				M[14] <= size >> 29;
+				M[15] <= size * 8;
 			end
 			state <= COMPUTE_W;
 		end
@@ -271,29 +242,17 @@ endfunction
 				if (t < 16) begin 
 					w[t] <= M[t];
 				end else begin
-					 s0 = rrot(w[t-15], 7) ^ rrot(w[t-15], 18) ^ (w[t-15] >> 3);
-                s1 = rrot(w[t-2], 17) ^ rrot(w[t-2], 19) ^ (w[t-2] >> 10);
-                w[t] <= w[t-16] + s0 + w[t-7] + s1;
+				
+					s0 = rrot(w[t-15], 7) ^ rrot(w[t-15], 18) ^ (w[t-15] >> 3);
+               s1 = rrot(w[t-2], 17) ^ rrot(w[t-2], 19) ^ (w[t-2] >> 10);
+               w[t] <= w[t-16] + s0 + w[t-7] + s1;
+				
+
 				end
 				state <= UPDATE_S;
 				//state <= UPDATE_S0;
 			end
 		end
-		/*
-		UPDATE_S0:
-		begin
-			S0 <= rrot(A, 2) ^ rrot(A, 13) ^ rrot(A, 22);
-			maj <= (A & B) ^ (A & C) ^ (B & C);
-			state <= UPDATE_S1;
-		end
-		
-		UPDATE_S1:
-		begin
-			S1 <= rrot(E, 6) ^ rrot(E, 11) ^ rrot(E, 25);
-			ch <= (E & F) ^ ((~E) & G);
-			state <= UPDATE_T;
-		end
-		*/
 		
 		UPDATE_S:
 		begin
@@ -335,14 +294,6 @@ endfunction
 			begin
 				$display("UPDATE_HASH state");
 				
-				/*h[0] <= h[0] + A;
-				h[1] <= h[1] + B;
-				h[2] <= h[2] + C;
-				h[3] <= h[3] + D;
-				h[4] <= h[4] + E;
-				h[5] <= h[5] + F;
-				h[6] <= h[6] + G;
-				h[7] <= h[7] + H;*/
 				h0 <= h0 + A;
 				h1 <= h1 + B;
 				h2 <= h2 + C;
