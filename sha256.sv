@@ -50,9 +50,15 @@ logic[31:0] pad_start;
 int i;
 
 logic   [ 31:0] s1, s0;
-logic   [ 31:0] w[0:63];
-//logic[31:0] w[0:15];
+//logic   [ 31:0] w[0:63];
+logic[31:0] w[0:15];
 
+function logic [31:0] wtnew; // function with no inputs
+ logic [31:0] sa, sb;
+ sa = rrot(w[1],7)^rrot(w[1],18)^(w[1]>>3);
+ sb = rrot(w[14],17)^rrot(w[14],19)^(w[14]>>10);
+ wtnew = w[0] + sa + w[9] + sb;
+endfunction
 
 
 function logic [31:0] rrot(input logic[31:0] oldW, input logic[7:0] r);
@@ -241,22 +247,30 @@ endfunction
 				// do on cycle of execution.
 				if (t < 16) begin 
 					w[t] <= M[t];
+					{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, M[t], t);
 				end else begin
-				
+				/*
 					s0 = rrot(w[t-15], 7) ^ rrot(w[t-15], 18) ^ (w[t-15] >> 3);
                s1 = rrot(w[t-2], 17) ^ rrot(w[t-2], 19) ^ (w[t-2] >> 10);
                w[t] <= w[t-16] + s0 + w[t-7] + s1;
-				
-
+*/
+					for (i = 0; i < 15; i=i+1) begin
+						w[i] <= w[i+1];
+					end 
+					w[15] <= wtnew();
+					{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, wtnew(), t);
 				end
-				state <= UPDATE_S;
-				//state <= UPDATE_S0;
+				t <= t + 1;
+				state <= COMPUTE_W;
+				//state <= UPDATE_PARAM;
+				//state <= UPDATE_S;
 			end
 		end
 		
 		UPDATE_S:
 		begin
 			$display("update_s");
+			
 			S0 <= rrot(A, 2) ^ rrot(A, 13) ^ rrot(A, 22);
 			S1 <= rrot(E, 6) ^ rrot(E, 11) ^ rrot(E, 25);
 			maj <= (A & B) ^ (A & C) ^ (B & C);
@@ -267,7 +281,11 @@ endfunction
 		UPDATE_T:
 		begin
 			$display("update_t");
-			t1 <= H + S1 + ch + sha256_k[t] + w[t];
+			if(t < 16) begin
+				t1 <= H + S1 + ch + sha256_k[t] + w[t];
+			end else begin
+				t1 <= H + S1 + ch + sha256_k[t] + w[15];
+			end
 			t2 <= S0 + maj;
 			state <= UPDATE_PARAM;
 		end
@@ -276,16 +294,20 @@ endfunction
 		begin
 			
 			$display("update_param");
-
-			A <= t1 + t2;
+			/*A <= t1 + t2;
 			B <= A;
 			C <= B;
 			D <= C;
 			E <= D + t1;
 			F <= E;
 			G <= F;
-			H <= G;
-			//{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, w[t], t);
+			H <= G;*/
+			
+			if (t < 16) begin
+				{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, w[t], t);
+			end else begin
+				{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, w[15], t);
+			end
 			t <= t + 1;
 			state <= COMPUTE_W;
 		end
