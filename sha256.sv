@@ -7,7 +7,7 @@ module sha256(input logic clk, reset_n, start,
  	
  enum logic [3:0] {IDLE=4'b0000, PRO_READ=4'b0001, SET_ONLY=4'b0010, READ_AND_SET=4'b0011, 
  READ_ONLY=4'b0100, DONE=4'b0101, PADDING=4'B0110, COMPUTE_W=4'b0111, UPDATE_HASH=4'b1000,
- UPDATE_PARAM=4'b1001,WRITE=4'b1010, UPDATE_S=4'b1011, UPDATE_T=4'b1100, UPDATE_S0=4'b1110, UPDATE_S1=4'b1111} state;
+ UPDATE_PARAM=4'b1001,WRITE=4'b1010, UPDATE_S=4'b1011, PRE_COMPUTE_W=4'b1100} state;
 
   logic [15:0] rc, wc; // read and write counters during read state
   logic [15:0] out_wc;
@@ -33,15 +33,16 @@ module sha256(input logic clk, reset_n, start,
 logic [31:0] h0, h1, h2, h3, h4, h5, h6, h7;
 
 
-logic [31:0] A; 
-logic [31:0] B; 
+logic [31:0] A, B, C, D, E, F, G, H, p; 
+/*logic [31:0] B; 
 logic [31:0] C; 
 logic [31:0] D; 
 logic [31:0] E; 
 logic [31:0] F; 
 logic [31:0] G; 
 logic [31:0] H;
-logic [31:0] S1, S0, ch, maj, t1, t2;
+logic [31:0] p;*/
+//logic [31:0] S1, S0, ch, maj, t1, t2, p;
 
 logic [31:0] M[0:15];
 logic is_padding_block;
@@ -68,13 +69,13 @@ end
 endfunction
 
 
-function logic [255:0] sha256_op(input logic [31:0] a, b, c, d, e, f, g, h, w,
-                                 input logic [7:0] t);
+function logic [255:0] sha256_op(input logic [31:0] a, b, c, d, e, f, g, h, w, p);
     logic [31:0] S1, S0, ch, maj, t1, t2; // internal signals
 begin
     S1 = rrot(e, 6) ^ rrot(e, 11) ^ rrot(e, 25);
     ch = (e & f) ^ ((~e) & g);
-    t1 = h + S1 + ch + sha256_k[t] + w;
+    //t1 = S1 + ch + sha256_k[t] + w + h;
+	 t1 = S1 + ch + p;
     S0 = rrot(a, 2) ^ rrot(a, 13) ^ rrot(a, 22);
     maj = (a & b) ^ (a & c) ^ (b & c);
     t2 = S0 + maj;
@@ -140,7 +141,7 @@ endfunction
 					end
 					M[14] <= size >> 29;
 					M[15] <= size * 8;
-					state <= COMPUTE_W;
+					state <= PRE_COMPUTE_W;
 					// TODO: block_counter
 				end else if((blk_counter == num_blks -1) && (is_padding_block == 1)) begin
 					// TODO: append in bits rather than bytes. check testbench
@@ -150,7 +151,7 @@ endfunction
 					end
 					M[14] <= size>>29;
 					M[15] <= size * 8;
-					state <= COMPUTE_W;
+					state <= PRE_COMPUTE_W;
 				end else begin
 					for (i=0; i<16; i=i+1) begin
 						M[i] <= 32'h00000000;
@@ -202,14 +203,14 @@ endfunction
 					if((blk_counter*64 + (wc+1)*4 >= size)) begin
 						state <= PADDING;
 					end else begin
-						state <= COMPUTE_W;
+						state <= PRE_COMPUTE_W;
 					end
 				end
 			end
 		PADDING:
 		if (size%64 == 0) begin
 			$display("Find padding with exact blk");
-			state <= COMPUTE_W;
+			state <= PRE_COMPUTE_W;
 			is_exact_block <= 1'b1;
 		end
 		else begin
@@ -233,32 +234,40 @@ endfunction
 				M[14] <= size >> 29;
 				M[15] <= size * 8;
 			end
-			state <= COMPUTE_W;
+			state <= PRE_COMPUTE_W;
 		end
+		PRE_COMPUTE_W:
+			// only handle the first cycle.
+			
+			begin
+				w[0] <= M[0];
+				p <= H + sha256_k[0] + M[0];
+				t <= t + 1;
+				state <= COMPUTE_W;
+			end
 		COMPUTE_W:
 		
 		begin
 			$display("COMPUTE_W state");
 			if (t == 64) begin
 				// done with this round, go back to proread
+				{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, w[15], p);
 				state <= UPDATE_HASH;
 				
 			end else begin
 				// do on cycle of execution.
 				if (t < 16) begin 
+					{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, w[t-1], p);
 					w[t] <= M[t];
-					{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, M[t], t);
+					p <= G + sha256_k[t] + M[t];
 				end else begin
-				/*
-					s0 = rrot(w[t-15], 7) ^ rrot(w[t-15], 18) ^ (w[t-15] >> 3);
-               s1 = rrot(w[t-2], 17) ^ rrot(w[t-2], 19) ^ (w[t-2] >> 10);
-               w[t] <= w[t-16] + s0 + w[t-7] + s1;
-*/
+					{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, w[15], p);
 					for (i = 0; i < 15; i=i+1) begin
 						w[i] <= w[i+1];
 					end 
 					w[15] <= wtnew();
-					{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, wtnew(), t);
+					p <= G + sha256_k[t] +wtnew();
+					//{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, wtnew(), t);
 				end
 				t <= t + 1;
 				state <= COMPUTE_W;
@@ -266,7 +275,7 @@ endfunction
 				//state <= UPDATE_S;
 			end
 		end
-		
+		/*
 		UPDATE_S:
 		begin
 			$display("update_s");
@@ -294,14 +303,6 @@ endfunction
 		begin
 			
 			$display("update_param");
-			/*A <= t1 + t2;
-			B <= A;
-			C <= B;
-			D <= C;
-			E <= D + t1;
-			F <= E;
-			G <= F;
-			H <= G;*/
 			
 			if (t < 16) begin
 				{A, B, C, D, E, F, G, H} <= sha256_op(A, B, C, D, E, F, G, H, w[t], t);
@@ -311,7 +312,7 @@ endfunction
 			t <= t + 1;
 			state <= COMPUTE_W;
 		end
-		
+		*/
 		UPDATE_HASH:
 			begin
 				$display("UPDATE_HASH state");
