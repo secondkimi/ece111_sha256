@@ -1,1 +1,6 @@
+Using System Verilog to implement sha-256 for bitcoin mining. 
+
+Achieved CPU frequency: 151.7 MHz
+Total CPU cycles for bitcoin mining: 247
+Total Delay (Cycles / CPU frequency): 1.6 microsec
 
